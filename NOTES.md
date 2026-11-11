@@ -44,3 +44,26 @@ Lỗi A5 được giảm nhưng chưa xử lý hết: nên yêu cầu câu trả
 ## 5. Giới hạn
 
 `get_status` chỉ tìm trong 50 incident gần nhất và trả tối đa 5 kết quả; nó không phải công cụ tra cứu toàn bộ lịch sử theo năm. Snapshot cố định cũng không cho biết trạng thái trực tiếp hiện tại. Điểm LLM judge có thể dao động giữa các lần chạy.
+
+## Bonus: phần đã triển khai
+
+- Agent dùng `tools.schemas` và `tools.system_prompt`, tương thích với sáu tool của `BonusTools`.
+- Lỗi `RATE_LIMITED`, `INVALID_ARGUMENTS` và timeout được đưa lại cho model; số lỗi liên tiếp cho cùng tool/provider/incident bị giới hạn ở 3.
+- Nếu có `Retry-After`, agent chờ khi thời gian không quá 2 giây; nếu lâu hơn hoặc không đọc được, agent dừng retry và báo partial result qua tool observation. HTTP 429 không được xem là outage.
+- Tool result có trường `distractors` được rút gọn trước khi đưa vào model context; ghi chú số mục đã bỏ trong kết quả/trace.
+- Prompt hướng dẫn phân trang bằng `next_offset`, giữ `limit` trong khoảng 1–3, trích nguồn và bỏ qua prompt injection.
+- Hạn chế: phân trang tiếp theo vẫn phụ thuộc vào quyết định của model; chạy full bonus eval để đo độ ổn định và kiểm tra các câu trả lời.
+
+
+### Kết quả bonus eval
+
+File `eval_bonus.json` có đủ 10/10 case được chấm, 0 case unscored. Cấu hình: OpenRouter `openai/gpt-4o-mini` cho agent và judge, `max_steps=16`. Điểm là 73/100, tương đương 10.95/15 điểm bonus.
+
+- Điểm tốt: B2 đạt 100 và trace đọc nhiều trang timeline; B8 đạt 100 khi so sánh hai incident; B9 đạt 100 khi từ chối xác nhận dịch vụ không có tool.
+- B3 đạt 75: trace cho thấy đã gặp 429 rồi retry thành công, nhưng câu trả lời không nói rõ lần đầu bị rate limit.
+- B4 đạt 65: trace có đúng 3 lần gọi Vercel và báo không xác minh được status. Phần reason của judge nói vượt giới hạn 3 lần, nhưng trace và mechanical check ghi 3 calls, không có violation; đây có vẻ là judge chấm chưa khớp bằng chứng.
+- B6 đạt 50: có gọi Vercel và npm status, nhưng thiếu `get_incident_details` nên chưa kiểm tra đủ scope/incident URL như câu hỏi yêu cầu.
+- B10 đạt 50: trace chỉ gọi Vercel một lần, nhận 429 rồi kết thúc; mechanical check ghi thiếu lần retry tối thiểu thứ hai. Đây là lỗi rõ nhất còn lại về retry sau rate limit.
+- B1 đạt 55 dù trace gọi đủ cả 5 status tools. Khi xem điểm thấp, cần đối chiếu judge với từng tool result; judge có thể chấm sai cách diễn đạt trạng thái.
+
+Giới hạn còn lại: prompt hướng dẫn retry và đọc chi tiết, nhưng model vẫn có thể kết thúc sớm sau một 429 hoặc không gọi incident details. Một lượt bonus eval cũng chỉ là mẫu đơn; điểm judge có thể dao động.
